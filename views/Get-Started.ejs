@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Secretive Chat System</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Hind+Vadodara:wght@500&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: "Hind Vadodara", sans-serif;
+            font-weight: 500;
+            color: #fff;
+        }
+
+        html,
+        body {
+            height: 100%;
+            background: linear-gradient(120deg, #0f2027, #203a43, #2c5364);
+            background-size: 400% 400%;
+            animation: bgGradientMove 15s ease infinite;
+            overflow: hidden;
+        }
+
+        @keyframes bgGradientMove {
+            0% {
+                background-position: 0% 50%;
+            }
+
+            50% {
+                background-position: 100% 50%;
+            }
+
+            100% {
+                background-position: 0% 50%;
+            }
+        }
+
+        body::before {
+            content: "";
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background:
+                radial-gradient(circle at 20% 40%, rgba(255, 255, 255, 0.05), transparent 40%),
+                radial-gradient(circle at 80% 60%, rgba(255, 255, 255, 0.03), transparent 40%);
+            z-index: 0;
+            pointer-events: none;
+            animation: pulseOverlay 6s infinite alternate;
+        }
+
+        @keyframes pulseOverlay {
+            0% {
+                opacity: 0.4;
+            }
+
+            100% {
+                opacity: 0.6;
+            }
+        }
+
+        .flash-msg.act {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 15px 25px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            z-index: 9999;
+            animation: fadeOut 2.5s forwards;
+            opacity: 1;
+        }
+
+        .flash-msg.success.act {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .flash-msg.error.act {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .flash-msg.warning.act {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeeba;
+        }
+
+        @keyframes fadeOut {
+            0% {
+                opacity: 1;
+            }
+
+            80% {
+                opacity: 1;
+            }
+
+            100% {
+                opacity: 0;
+                display: none;
+            }
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            height: 100%;
+            padding: 2vh 2vw;
+            backdrop-filter: blur(10px);
+        }
+
+        .b {
+            background: linear-gradient(135deg, #00c6ff, #0072ff);
+            width: 8vmax;
+            height: 6vmin;
+            border-radius: 500px;
+            font-weight: 900;
+            font-size: 15px;
+            position: absolute;
+            top: 25px;
+            right: 30px;
+            border: none;
+            color: white;
+            transition: 0.3s ease;
+        }
+
+        .b:hover {
+            background: linear-gradient(135deg, #00c6ff, #0053ba);
+            box-shadow: 0 0 20px 4px #00aaffaa, 0 0 40px 12px #0077ff55;
+            cursor: pointer;
+        }
+
+        .welcome-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2vh;
+        }
+
+        .hello h1 {
+            font-size: 3rem;
+            text-align: center;
+        }
+
+        .welcome-message {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 2rem;
+            letter-spacing: 1px;
+            font-weight: bold;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            text-align: center;
+        }
+
+        .welcome-message span {
+            animation: glowWord 7s infinite;
+            letter-spacing: 8px;
+        }
+
+        .welcome-message span:nth-child(1) {
+            animation-delay: 0s;
+        }
+
+        .welcome-message span:nth-child(2) {
+            animation-delay: 1s;
+        }
+
+        .welcome-message span:nth-child(3) {
+            animation-delay: 2s;
+        }
+
+        .welcome-message span:nth-child(4) {
+            animation-delay: 3s;
+        }
+
+        .welcome-message span:nth-child(5) {
+            animation-delay: 4s;
+        }
+
+        .welcome-message span:nth-child(6) {
+            animation-delay: 5s;
+        }
+
+        .welcome-message span:nth-child(7) {
+            animation-delay: 6s;
+        }
+
+        @keyframes glowWord {
+
+            0%,
+            20%,
+            100% {
+                color: #fff;
+                text-shadow: none;
+            }
+
+            10% {
+                color: #00d9ff;
+                text-shadow:
+                    0 0 10px #6ae0f5,
+                    0 0 20px #00c4ff,
+                    0 0 40px #00b4ff,
+                    0 0 60px #00aaff,
+                    0 0 80px #009eff,
+                    0 0 100px #008eff;
+            }
+        }
+
+        .center-image {
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            margin: 2vh 0;
+        }
+
+        .center-image img {
+            max-width: 20vmax;
+            height: auto;
+            filter: drop-shadow(0 0 10px #00c4ff55);
+        }
+
+        .input-container {
+            width: 100%;
+            padding: 20px 0;
+            display: flex;
+            justify-content: center;
+        }
+
+        .glow-input {
+            width: 90%;
+            max-width: 50vmax;
+            padding: 16px 20px;
+            font-size: 1.1rem;
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            background: linear-gradient(90deg, #1a1a1a 60%, #1983c0 100%);
+            box-shadow: 0 0 20px 2px #3672ad55, 0 0 40px 8px #3e97eb33;
+            outline: none;
+            transition: box-shadow 0.4s ease, background 0.4s ease;
+        }
+
+        .glow-input:focus {
+            background: linear-gradient(90deg, #1a1a1a 40%, #36a0f7 100%);
+            box-shadow:
+                0 0 20px 4px #2dabff,
+                0 0 40px 12px #2da0ff88,
+                0 0 80px 24px #2d88ff44;
+        }
+
+        .glow-input::placeholder {
+            color: #b6dcff;
+            opacity: 0.7;
+            font-style: italic;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="flash-msg success"></div>
+    <div class="flash-msg error"></div>
+    <div class="flash-msg warning"></div>
+    <div class="container">
+        <button class="b">Logout</button>
+
+        <div class="welcome-section">
+            <div class="hello">
+                <h1>Greetings, <%= name %>
+                </h1>
+            </div>
+
+            <div class="welcome-message">
+                <span>We</span>
+                <span>appreciate</span>
+                <span>you</span>
+                <span>using</span>
+                <span>our</span>
+                <span>Chat</span>
+                <span>App</span>
+            </div>
+
+            <div class="center-image">
+                <img src="Svg/chat.png" alt="Chat Icon">
+            </div>
+        </div>
+
+        <div class="input-container">
+            <form action="#" class="enter"
+                style="display: flex; justify-content: center; width: 100%; max-width: 55vw;">
+                <input class="glow-input" type="text"
+                    placeholder="Enter the username of the person whom you want to message..." required />
+                <button type="submit" style="background:none;border:none;padding:0;cursor:pointer">
+                    <img src="/Svg/search.svg" alt="submit">
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Flash message function
+        function showFlashMessage(type, message, redirectUrl = null, delay = 2000) {
+            // Reset all flash messages first
+            const allMessages = document.querySelectorAll('.flash-msg');
+            allMessages.forEach(msg => {
+                msg.classList.remove('act');
+                msg.innerHTML = "";
+            });
+
+            // Show the specific message
+            const messageElement = document.querySelector(`.flash-msg.${type}`);
+            if (messageElement) {
+                messageElement.classList.add('act');
+                messageElement.innerHTML = message;
+
+                setTimeout(() => {
+                    messageElement.classList.remove('act');
+                    messageElement.innerHTML = "";
+                    if (redirectUrl) {
+                        window.location.href = redirectUrl;
+                    }
+                }, delay);
+            }
+        }
+
+        document.querySelector('.b').addEventListener('click', () => {
+            showFlashMessage('success', 'You have been logged out successfully! Redirecting to login page', '/logout');
+        });
+        const form = document.querySelector('.enter');
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const input = form.querySelector('.glow-input');
+            const username = input.value.trim();
+            input.value = '';
+            console.log('Form submitted -->', username);
+            
+            const resp = await fetch(`/chat/${username}/verify`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            const data = await resp.json();
+            if (data.verified) {
+                showFlashMessage('success', `Connecting to chat with ${username}...`, `/chat/${username}`);
+                return;
+            } else {
+                showFlashMessage('error', data.message ,'/get-started');
+                return;
+            }
+        });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chat with <%= chatUser.name %></title>
+    <link rel="stylesheet" href="/Styles/style_chat.css"/>
+</head>
+
+<body>
+    <div class="chat-container">
+        <!-- Chat Header -->
+        <div class="chat-header">
+            <button id="homeBtn" class="home-btn" title="Go back to home">🏠</button>
+            <div class="chat-user-info">
+                <h3><%= chatUser.name %> (@<%= chatUser.username %>)</h3>
+                <span class="online-status" id="onlineStatus">Offline</span>
+            </div>
+        </div>
+        
+        <!-- Messages Container -->
+        <div id="messages" class="messages">
+            <% if (messages.length === 0) { %>
+                <div class="no-messages">
+                    <div class="no-messages-icon">💬</div>
+                    <p>No message history</p>
+                    <small>Start a conversation with <%= chatUser.name %></small>
+                </div>
+            <% } else { %>
+                <% messages.forEach(function(msg) { %>
+                    <div class="message <%= msg.sender._id.toString() === currentUser._id.toString() ? 'user' : 'bot' %>" data-message-id="<%= msg._id %>">
+                        <!-- here bot indicates receiver and user indicates sender i.e. myself-->
+                        <% if (msg.message) { %>
+                            <p><%= msg.message %></p>
+                        <% } %>
+                        <% if (msg.fileData) { %>
+                            <div class="file-content" data-file="<%= encodeURIComponent(JSON.stringify(msg.fileData)) %>"></div>
+                        <% } %>
+                        <div class="timestamp"><%= new Date(msg.timestamp).toLocaleTimeString() %></div>
+                    </div>
+                <% }); %>
+            <% } %>
+        </div>
+        
+        <!-- Input Area -->
+        <div class="input-area">
+            <label for="fileInput" class="file-label" title="Attach file">📎</label>
+            <input type="file" id="fileInput"  accept="*/*" />
+            <input type="text" id="textInput" placeholder="Type a message to <%= chatUser.name %>..." />
+            <button id="sendBtn" class="send-btn">Send</button>
+        </div>
+    </div>
+
+    <!-- For passing data to the client-side script, we use a hidden div with data attributes. -->
+    <div id="chatData" style="display: none;" 
+         data-current-user="<%= encodeURIComponent(JSON.stringify(currentUser)) %>"
+         data-chat-user="<%= encodeURIComponent(JSON.stringify(chatUser)) %>"
+         data-messages="<%= encodeURIComponent(JSON.stringify(messages)) %>">
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script> 
+    <!-- The above script is necessary for real-time communication in our custom script_chat.js -->
+    <script src="/Scripts/script_chat.js"></script>
+</body>
+</html>

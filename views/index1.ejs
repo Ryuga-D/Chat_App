@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login & Register Form</title>
+    <link rel="stylesheet" href="/Styles/style1.css">
+</head>
+
+<body>
+    <div class="flash-msg success"></div>
+    <div class="flash-msg error"></div>
+    <div class="flash-msg warning"></div>
+
+    <div class="container">
+        <div class="curved-shape"></div>
+        <div class="curved-shape2"></div>
+
+        <!-- Login Form (Shows by default with WELCOME!) -->
+        <div class="form-box Login">
+            <h2 class="animation" style="--D:0">Login</h2>
+            <form action="#" class="login-form">
+                <div class="input-box animation" style="--D:1">
+                    <input type="email" id = "email-l" required>
+                    <label for="">Email</label>
+                    <img src="/Svg/email.svg" alt="email">
+                </div>
+                <div class="input-box animation" style="--D:2">
+                    <input type="password" id = "password-l" required>
+                    <label for="">Password</label>
+                    <img src="/Svg/pass1.svg" alt="password">
+                </div>
+                <div class="input-box animation" style="--D:3">
+                    <button class="btn" type="submit">Login</button>
+                </div>
+                <div class="regi-link animation" style="--D:4">
+                    <p>Don't have an account? <a href="#" class="SignUpLink">Sign Up</a></p>
+                </div>
+            </form>
+        </div>
+
+        <!-- Welcome Info Content -->
+        <div class="info-content Login">
+            <h2 class="animation" style="--D:0">WELCOME!</h2>
+            <button class="get-started-btn animation" style="--D:2;" id="signUpBtn">Get
+                Started</button>
+        </div>
+
+        <!-- Register Form -->
+        <div class="form-box Register">
+            <h2 class="animation" style="--li:17;">Register</h2>
+            <form action="#" class="register-form">
+                <div class="input-box animation" style="--li:18;">
+                    <input type="text" id="name-r" required>
+                    <label for="">Name</label>
+                    <img src="/Svg/user1.svg" alt="user">
+                </div>
+                <div class="input-box animation" style="--li:19;">
+                    <input type="text" id="username-r" required>
+                    <label for="">Username</label>
+                    <img src="/Svg/user1.svg" alt="user">
+                </div>
+                <div class="input-box animation" style="--li:20;">
+                    <input type="email" id="email-r" required>
+                    <label for="">Email</label>
+                    <img src="/Svg/email.svg" alt="email">
+                </div>
+                <div class="input-box animation" style="--li:21;">
+                    <input type="password" id="password-r" required>
+                    <label for="">Create Password</label>
+                    <img src="/Svg/pass1.svg" alt="password">
+                </div>
+                <div class="input-box animation" style="--li:22;">
+                    <button class="btn" type="submit">Register</button>
+                </div>
+                <div class="regi-link animation" style="--li:23;">
+                    <p>Already have an account? <a href="#" class="SignInLink">Sign In</a></p>
+                </div>
+            </form>
+        </div>
+
+        <!-- Hello Friend Info Content -->
+        <div class="info-content Register">
+            <h2 class="animation" style="--li:17;">HELLO FRIEND!</h2>
+            <button class="get-started-btn animation" style="--li:19;align-self: flex-start;" id="signInBtn">Get
+                Started</button>
+        </div>
+    </div>
+    <script type="module" src="/Scripts/script1.js"></script>
+</body>
+</html>
