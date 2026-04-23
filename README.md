@@ -6,7 +6,7 @@ A highly secure, real-time web-based chat application that leverages modern cryp
 
 - **Real-Time Messaging**: Instant communication with online status and missed message notifications, powered by Socket.IO.
 - **File Sharing**: Support for uploading and sharing files natively within the chat.
-- **Passwordless Authentication**: Secure user login using **WebAuthn / Passkeys** (e.g., fingerprint, Face ID) rather than traditional passwords.
+- **Authentication**: Secure user login using **WebAuthn / Passkeys** (e.g., fingerprint, Face ID) along with traditional passwords.
 - **Advanced End-to-End Encryption**:
   - Uses **Shamir's Secret Sharing** and **AES-256** to encrypt messages and files.
   - Generates encryption keys based on the unique biometric fingerprints of both the sender and receiver.
