@@ -13,9 +13,10 @@ const bcrypt = require('bcrypt');
 const cookieParser = require('cookie-parser');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
-require('dotenv').config();// For Accessing environment variables
+const { createCanvas } = require('canvas');
+const { spawn } = require('child_process');
+require('dotenv').config();
 const { Server } = require('socket.io');
-
 
 // Update your server configuration
 server.timeout = 600000; // 10 minutes
@@ -26,10 +27,19 @@ server.headersTimeout = 660000; // Slightly longer than keepAliveTimeout
 if (!globalThis.crypto) {
     globalThis.crypto = crypto;
 }
-// Increase payload limits to GB
-app.use(express.json({ limit: '5gb' }));
-app.use(express.urlencoded({ extended: true, limit: '5gb' }));
+// Increase JSON payload limits to 1GB
+app.use(express.json({ limit: '1gb' }));
+app.use(express.urlencoded({ extended: true, limit: '1gb' }));
+// Set view engine and static files directory
+app.set('view engine', 'ejs');
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(cookieParser());
 
+
+// Adding the hashFingerprint function
+function hashFingerprint(fingerprintHex) {
+    return crypto.createHash('sha256').update(fingerprintHex, 'hex').digest('hex');
+}
 
 // Configure multer
 const storage = multer.diskStorage({
@@ -54,7 +64,7 @@ const storage = multer.diskStorage({
     }
 });
 
-// This upload object can now be used as middleware in a route to handle single or multiple file uploads.
+// 
 const upload = multer({
     storage: storage,
     limits: {
@@ -62,6 +72,77 @@ const upload = multer({
         fieldSize: 1024 * 1024 * 1024 // 1GB field size limit 
     }
 });
+
+// Function to create a random image and return it
+async function createRandomImage(width = 1024, height = 1024) {
+    const canvas = createCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+
+    // Create image data
+    const imageData = ctx.createImageData(width, height);
+    const data = imageData.data;
+
+    // Fill with random colors
+    for (let i = 0; i < data.length; i += 4) {
+        data[i] = Math.floor(Math.random() * 256);     // Red
+        data[i + 1] = Math.floor(Math.random() * 256); // Green
+        data[i + 2] = Math.floor(Math.random() * 256); // Blue
+        data[i + 3] = 255;                             // Alpha (fully opaque)
+    }
+
+    // Put the image data on canvas
+    ctx.putImageData(imageData, 0, 0);
+
+    return canvas;
+}
+
+// Helper function to execute Python script
+function executePython(command, data, timeout = 600000) {
+    return new Promise((resolve, reject) => {
+        const python = spawn('python', ['Encrypt_Decrypt.py', command, JSON.stringify(data)]);
+
+        let result = '';
+        let error = '';
+
+        // Set timeout
+        const timer = setTimeout(() => {
+            python.kill();
+            reject(new Error('Python script timeout'));
+        }, timeout);
+
+        python.stdout.on('data', (data) => {
+            result += data.toString();
+        });
+
+        python.stderr.on('data', (data) => {
+            error += data.toString();
+        });
+
+        python.on('close', (code) => {
+            clearTimeout(timer);
+
+            if (code !== 0) {
+                reject(new Error(error || `Python script exited with code ${code}`));
+            } else {
+                try {
+                    const parsedResult = JSON.parse(result.trim());
+                    if (parsedResult.error) {
+                        reject(new Error(parsedResult.error));
+                    } else {
+                        resolve(parsedResult);
+                    }
+                } catch (e) {
+                    reject(new Error('Failed to parse Python output: ' + result));
+                }
+            }
+        });
+
+        python.on('error', (err) => {
+            clearTimeout(timer);
+            reject(new Error('Failed to start Python process: ' + err.message));
+        });
+    });
+}
 
 // Initialize Socket.IO with increased limits
 const io = new Server(server, {
@@ -80,6 +161,28 @@ const activeTransfers = {}; // Added this for file transfer tracking
 
 // Handle chat messages
 io.on('connection', (socket) => {
+    const host = socket.handshake.headers.host;
+    let origin;
+
+    if (host && host.includes('.loca.lt')) {
+        // Force HTTPS for localtunnel
+        origin = `https://${host}`;
+    } else if (host && host.includes('localhost')) {
+        // Use HTTP for localhost
+        origin = `http://${host}`;
+    } else {
+        // Default behavior
+        origin = socket.handshake.headers.origin ||
+            `${socket.handshake.secure ? 'https' : 'http'}://${host}`;
+    }
+
+    const rpID = origin.includes('localhost') ? 'localhost' : new URL(origin).hostname;
+
+    socket.origin = origin;
+    socket.rpID = rpID;
+
+    console.log(`Socket connected - Origin: ${origin}, RP ID: ${rpID}`);
+
     // Log the connection
     socket.on('join', async (userId) => {
         connectedUsers[userId] = socket.id;
@@ -213,71 +316,42 @@ io.on('connection', (socket) => {
                 socket.emit('messageError', { error: 'Transfer not found' });
                 return;
             }
-
-            // Save message with file metadata to database
-            const messageData = {
-                sender: transfer.senderId,
-                receiver: transfer.receiverId,
-                message: message || '',
-                fileData: {
-                    filename: fileData.filename,
-                    originalName: fileData.originalName,
-                    size: fileData.size,
-                    type: fileData.mimetype,
-                    path: fileData.path
-                },
-                timestamp: new Date(),
-                isRead: false
-            };
-
-            const newMessage = await chatmodel.create(messageData);
-            await newMessage.populate('sender receiver', 'username name');
-
-            // Send to receiver
-            const receiverSocketId = connectedUsers[transfer.receiverId];
-            if (receiverSocketId) {
-                io.to(receiverSocketId).emit('receiveMessage', {
-                    _id: newMessage._id,
-                    sender: newMessage.sender,
-                    receiver: newMessage.receiver,
-                    message: newMessage.message,
-                    fileData: newMessage.fileData,
-                    timestamp: newMessage.timestamp
-                });
-            }
-
-            // Confirm to sender
+            // Don't save to database here - let the encryption handler do it
+            // Just confirm the upload and trigger encryption
+            // Send to sender for encryption (not as a regular message)
             socket.emit('messageConfirmed', {
-                _id: newMessage._id,
-                sender: newMessage.sender,
-                receiver: newMessage.receiver,
-                message: newMessage.message,
-                fileData: newMessage.fileData,
-                timestamp: newMessage.timestamp
+                fileData: fileData,
+                message: message || '',
             });
-
+            // Clean up transfer
             delete activeTransfers[fileId];
 
         } catch (error) {
-            console.error('Error saving message:', error);
-            socket.emit('messageError', { error: 'Failed to save message' });
+            console.error('Error in file upload complete:', error);
+            socket.emit('messageError', { error: 'Failed to process file upload' });
+            
+            // Clean up transfer on error
+            const { fileId } = data;
+            if (fileId && activeTransfers[fileId]) {
+                delete activeTransfers[fileId];
+            }
         }
     });
     socket.on('fileUploadFailed', (data) => {
         try {
             const { fileId } = data;
             const transfer = activeTransfers[fileId];
-            
+
             if (transfer) {
                 // Notify receiver that upload failed
                 const receiverSocketId = connectedUsers[transfer.receiverId];
                 if (receiverSocketId) {
-                    io.to(receiverSocketId).emit('fileUploadFailed', { 
+                    io.to(receiverSocketId).emit('fileUploadFailed', {
                         fileId,
-                        sender: { _id: transfer.senderId } 
+                        sender: { _id: transfer.senderId }
                     });
                 }
-            
+
                 // Clean up the transfer
                 delete activeTransfers[fileId];
             }
@@ -286,48 +360,427 @@ io.on('connection', (socket) => {
         }
     });
     // Handle sending messages
-    // This event is triggered when a user sends a message NOT including file
-    socket.on('sendMessage', async (data) => {
+    // Handle encrypted message sending
+    socket.on('sendEncryptedMessage', async (data) => {
         try {
-            const { senderId, receiverId, message, fileData } = data;
+            const { senderId, receiverId, message } = data;
 
-            // Prepare message data - only include fileData if it actually exists
+            // Emit initial progress
+            socket.emit('encryptionProgress', { stage: 'Preparing encryption...', progress: 10 });
+
+            // Create random cover image
+            const coverImage = await createRandomImage();
+            const coverImagePath = `./public/uploads/cover-${Date.now()}.png`;
+
+            // Save canvas as PNG
+            const buffer = coverImage.toBuffer('image/png');
+            fs.writeFileSync(coverImagePath, buffer);
+
+            socket.emit('encryptionProgress', { stage: 'Generating keys...', progress: 30 });
+
+            // Get user fingerprints
+            const sender = await usermodel.findById(senderId);
+            const receiver = await usermodel.findById(receiverId);
+
+            if (!sender || !receiver) {
+                socket.emit('messageError', { error: 'User not found' });
+                return;
+            }
+
+            // ✅ Get raw hex, then hash it to make it smaller
+            const rawFp1 = sender.passkey[0].credential.publicKey.toString('hex');
+            const rawFp2 = receiver.passkey[0].credential.publicKey.toString('hex');
+
+            const fp1 = hashFingerprint(rawFp1);
+            const fp2 = hashFingerprint(rawFp2);
+
+            console.log('🔍 DEBUG - Encryption fingerprints:');
+            console.log('  Sender ID:', senderId);
+            console.log('  Raw FP1:', rawFp1);
+            console.log('  Hashed FP1:', fp1);
+            console.log('  Receiver ID:', receiverId);
+            console.log('  Raw FP2:', rawFp2);
+            console.log('  Hashed FP2:', fp2);
+
+            // Define output path for encrypted image
+            const outputPath = `./public/uploads/encrypted-message-${Date.now()}.png`;
+
+            socket.emit('encryptionProgress', { stage: 'Encrypting message...', progress: 60 });
+
+            // Call Python encryption script
+            const result = await executePython('encrypt', {
+                fp1: fp1,
+                fp2: fp2,
+                message: message,
+                imagePath: coverImagePath,
+                outputPath: outputPath
+            });
+
+            socket.emit('encryptionProgress', { stage: 'Finalizing...', progress: 90 });
+
+            // Clean up cover image
+            fs.unlinkSync(coverImagePath);
+
+            // Save encrypted message to database
             const messageData = {
                 sender: senderId,
                 receiver: receiverId,
-                message: message || '',
+                message: '', // Empty since content is encrypted
+                encryptedData: {
+                    imagePath: outputPath,
+                    isEncrypted: true,
+                    type: 'message',
+                    originalFileName: undefined,
+                    originalFileSize: undefined,
+                    originalFileType: undefined
+                },
                 timestamp: new Date(),
                 isRead: false
             };
-            //fileData is always null
-            // Save message to database
+
             const newMessage = await chatmodel.create(messageData);
             await newMessage.populate('sender receiver', 'username name');
+
+            socket.emit('encryptionProgress', { stage: 'Complete!', progress: 100 });
 
             // Send to receiver if online
             const receiverSocketId = connectedUsers[receiverId];
             if (receiverSocketId) {
-                io.to(receiverSocketId).emit('receiveMessage', {
+                // First send incoming alert
+                io.to(receiverSocketId).emit('encryptedMessageIncoming', {
+                    sender: newMessage.sender,
+                    type: 'message'
+                });
+
+                // Then send the actual message
+                io.to(receiverSocketId).emit('receiveEncryptedMessage', {
                     _id: newMessage._id,
                     sender: newMessage.sender,
                     receiver: newMessage.receiver,
-                    message: newMessage.message,
+                    encryptedData: newMessage.encryptedData,
                     timestamp: newMessage.timestamp
                 });
             }
 
-            // Send back to sender for confirmation
-            socket.emit('messageConfirmed', {
+            // Confirm to sender
+            socket.emit('encryptedMessageConfirmed', {
                 _id: newMessage._id,
                 sender: newMessage.sender,
                 receiver: newMessage.receiver,
-                message: newMessage.message,
+                encryptedData: newMessage.encryptedData,
                 timestamp: newMessage.timestamp
             });
 
         } catch (error) {
-            console.error('Error sending message:', error);
-            socket.emit('messageError', { error: 'Failed to send message' });
+            console.error('Error sending encrypted message:', error);
+            socket.emit('messageError', { error: error.message });
+        }
+    });
+
+    // Handle encrypted file sending
+    socket.on('sendEncryptedFile', async (data) => {
+        try {
+            const { senderId, receiverId, fileData } = data;
+
+            // Emit initial progress
+            socket.emit('fileEncryptionProgress', { stage: 'Preparing file encryption...', progress: 10 });
+
+            // Create random cover image
+            const coverImage = await createRandomImage();
+            const coverImagePath = `./public/uploads/cover-${Date.now()}.png`;
+
+            // Save canvas as PNG
+            const buffer = coverImage.toBuffer('image/png');
+            fs.writeFileSync(coverImagePath, buffer);
+
+            socket.emit('fileEncryptionProgress', { stage: 'Generating encryption keys...', progress: 25 });
+
+            // Get user fingerprints
+            const sender = await usermodel.findById(senderId);
+            const receiver = await usermodel.findById(receiverId);
+
+            if (!sender || !receiver) {
+                socket.emit('messageError', { error: 'User not found' });
+                return;
+            }
+
+            // ✅ Get raw hex, then hash it
+            const rawFp1 = sender.passkey[0].credential.publicKey.toString('hex');
+            const rawFp2 = receiver.passkey[0].credential.publicKey.toString('hex');
+
+            const fp1 = hashFingerprint(rawFp1);
+            const fp2 = hashFingerprint(rawFp2);
+
+            // Define output path for encrypted image
+            const outputPath = `./public/uploads/encrypted-file-${Date.now()}.png`;
+
+            socket.emit('fileEncryptionProgress', { stage: 'Encrypting file data...', progress: 60 });
+
+            // Call Python encryption script for file
+            const result = await executePython('encrypt_file', {
+                fp1: fp1,
+                fp2: fp2,
+                filePath: `./public${fileData.path}`,
+                imagePath: coverImagePath,
+                outputPath: outputPath
+            });
+
+            socket.emit('fileEncryptionProgress', { stage: 'Finalizing encryption...', progress: 90 });
+
+            // Clean up cover image and original file
+            fs.unlinkSync(coverImagePath);
+            fs.unlinkSync(`./public${fileData.path}`);
+
+            // Save encrypted file message to database
+            const messageData = {
+                sender: senderId,
+                receiver: receiverId,
+                message: '',
+                encryptedData: {
+                    imagePath: outputPath,
+                    isEncrypted: true,
+                    type: 'file',
+                    originalFileName: fileData.originalName,
+                    originalFileSize: fileData.size,
+                    originalFileType: fileData.mimetype
+                },
+                timestamp: new Date(),
+                isRead: false
+            };
+
+            const newMessage = await chatmodel.create(messageData);
+            await newMessage.populate('sender receiver', 'username name');
+
+            socket.emit('fileEncryptionProgress', { stage: 'Complete!', progress: 100 });
+
+            // Send to receiver if online
+            const receiverSocketId = connectedUsers[receiverId];
+            if (receiverSocketId) {
+                // First send incoming alert
+                io.to(receiverSocketId).emit('encryptedMessageIncoming', {
+                    sender: newMessage.sender,
+                    type: 'file'
+                });
+
+                // Then send the actual message
+                io.to(receiverSocketId).emit('receiveEncryptedMessage', {
+                    _id: newMessage._id,
+                    sender: newMessage.sender,
+                    receiver: newMessage.receiver,
+                    encryptedData: newMessage.encryptedData,
+                    timestamp: newMessage.timestamp
+                });
+            }
+
+            // Confirm to sender
+            socket.emit('encryptedMessageConfirmed', {
+                _id: newMessage._id,
+                sender: newMessage.sender,
+                receiver: newMessage.receiver,
+                encryptedData: newMessage.encryptedData,
+                timestamp: newMessage.timestamp
+            });
+
+        } catch (error) {
+            console.error('Error sending encrypted file:', error);
+            socket.emit('messageError', { error: error.message });
+        }
+    });
+
+    // Handle decryption challenge request
+    socket.on('requestDecryptionChallenge', async (data) => {
+        try {
+            const { messageId, userId } = data;
+
+            const user = await usermodel.findById(userId);
+            if (!user || !user.passkey[0]) {
+                socket.emit('decryptionError', { error: 'User authentication data not found' });
+                return;
+            }
+            const arr = await challengeModel.find({ userid: user._id, messageId: messageId });
+            if (arr.length > 0) {
+                await challengeModel.deleteMany({ userid: user._id, messageId: messageId }); // Clear any existing challenges for the user
+            }
+            const challengeOptions = await generateAuthenticationOptions({
+                rpID: socket.rpID,
+            });
+
+            // Store challenge temporarily
+            await challengeModel.create({
+                userid: userId,
+                challenge: challengeOptions.challenge,
+                messageId: messageId
+            });
+
+            socket.emit('decryptionChallenge', {
+                messageId: messageId,
+                options: challengeOptions
+            });
+
+        } catch (error) {
+            console.error('Error generating decryption challenge:', error);
+            socket.emit('decryptionError', { error: 'Failed to generate challenge' });
+        }
+    });
+
+    // Handle decryption after challenge verification
+    socket.on('verifyAndDecrypt', async (data) => {
+        try {
+            const { messageId, userId, credential } = data;
+
+            const challenge = await challengeModel.findOne({ userid: userId, messageId: messageId });
+            const user = await usermodel.findById(userId);
+            const message = await chatmodel.findById(messageId);
+
+            if (!challenge || !user || !message) {
+                socket.emit('decryptionError', { error: 'Invalid decryption request' });
+                return;
+            }
+
+            // Check if user is authorized (sender or receiver)
+            if (userId !== message.sender.toString() && userId !== message.receiver.toString()) {
+                socket.emit('decryptionError', { error: 'You are not authorized to decrypt this message' });
+                return;
+            }
+
+            socket.emit('decryptionProgress', {
+                messageId: messageId,
+                stage: 'Verifying identity...',
+                progress: 20
+            });
+
+            // Verify authentication
+            const storedPasskey = user.passkey[0];
+            const credentialForVerification = {
+                id: storedPasskey.credential.id,
+                publicKey: storedPasskey.credential.publicKey,
+                counter: storedPasskey.credential.counter || 0,
+                transports: storedPasskey.credential.transports || ['internal']
+            };
+
+            const verificationResult = await verifyAuthenticationResponse({
+                expectedChallenge: challenge.challenge,
+                expectedOrigin: socket.origin,
+                expectedRPID: socket.rpID,
+                response: credential,
+                credential: credentialForVerification,
+            });
+
+            if (!verificationResult || !verificationResult.verified) {
+                await challengeModel.findOneAndDelete({ userid: userId, messageId: messageId });
+                socket.emit('decryptionError', { error: 'Authentication failed' });
+                return;
+            }
+
+            socket.emit('decryptionProgress', {
+                messageId: messageId,
+                stage: 'Preparing decryption...',
+                progress: 40
+            });
+
+            const rawFingerprint = user.passkey[0].credential.publicKey.toString('hex');
+            const fingerprint = hashFingerprint(rawFingerprint);
+            console.log('🔍 DEBUG - Decryption fingerprint:', fingerprint);
+            console.log('🔍 DEBUG - User ID:', userId);
+
+            const imagePath = message.encryptedData.imagePath;
+
+            if (message.encryptedData.type === 'message') {
+
+                socket.emit('decryptionProgress', {
+                    messageId: messageId,
+                    stage: 'Decrypting message...',
+                    progress: 70
+                });
+
+                const result = await executePython('decrypt', {
+                    fingerprint: fingerprint,
+                    imagePath: imagePath
+                });
+
+                socket.emit('decryptionProgress', {
+                    messageId: messageId,
+                    stage: 'Complete!',
+                    progress: 100
+                });
+
+                socket.emit('decryptionSuccess', {
+                    messageId: messageId,
+                    type: 'message',
+                    content: result.message
+                });
+            } else if (message.encryptedData.type === 'file') {
+
+                socket.emit('decryptionProgress', {
+                    messageId: messageId,
+                    stage: 'Decrypting file...',
+                    progress: 70
+                });
+
+                const outputPath = `./public/uploads/decrypted-${Date.now()}-${message.encryptedData.originalFileName}`;
+
+                const result = await executePython('decrypt_file', {
+                    fingerprint: fingerprint,
+                    imagePath: imagePath,
+                    outputPath: outputPath
+                });
+
+                socket.emit('decryptionProgress', {
+                    messageId: messageId,
+                    stage: 'Complete!',
+                    progress: 100
+                });
+
+                socket.emit('decryptionSuccess', {
+                    messageId: messageId,
+                    type: 'file',
+                    downloadPath: outputPath.replace('./public', ''),
+                    fileName: message.encryptedData.originalFileName,
+                    fileSize: message.encryptedData.originalFileSize,
+                    fileType: message.encryptedData.originalFileType
+                });
+            }
+
+            // Clean up challenge
+            await challengeModel.findOneAndDelete({ userid: userId, messageId: messageId });
+
+        } catch (error) {
+            console.error('Error during decryption:', error);
+            socket.emit('decryptionError', { error: 'Decryption failed: ' + error.message });
+        }
+    });
+
+    socket.on('decryptMessage', async (data) => {
+        try {
+            const { messageId, userId } = data;
+            // Get the encrypted message
+            const message = await chatmodel.findById(messageId);
+            const user = await usermodel.findById(userId);
+
+            if (!message || !user) {
+                socket.emit('decryptionError', { error: 'Message or user not found' });
+                return;
+            }
+
+            // Hash the user's fingerprint
+            const fingerprint = hashFingerprint(user.passkey[0].credential.id);
+
+            // Call Python decryption script
+            const result = await executePython('decrypt', {
+                fingerprint: fingerprint,
+                imagePath: message.encryptedData.imagePath
+            });
+
+            // Send decrypted content back
+            socket.emit('decryptionSuccess', {
+                messageId: messageId,
+                content: result.message,
+                type: message.encryptedData.type
+            });
+
+        } catch (error) {
+            console.error('Error decrypting message:', error);
+            socket.emit('decryptionError', { error: error.message });
         }
     });
 
@@ -343,10 +796,6 @@ io.on('connection', (socket) => {
         }
     });
 });
-
-app.set('view engine', 'ejs');
-app.use(express.static(path.join(__dirname, 'public')));
-app.use(cookieParser());
 const authenticateToken = function (req, res, next) {
     if (req.cookies.access_token) {
         jwt.verify(req.cookies.access_token, process.env.ACCESS_SECRET_KEY, (err, data) => {
@@ -583,14 +1032,14 @@ app.post('/login', async (req, res) => {
 
     const user = await usermodel.findOne({ email: email });
     if (!user) {
-        return res.json({ verified: false, message: 'Invalid email or password DFFGG' });
+        return res.json({ verified: false, message: 'Invalid email or password' });
     }
     bcrypt.compare(password, user.password, async (err, result) => {
         if (err) {
             return res.status(500).send('Internal Server Error');
         }
         if (!result) {
-            return res.json({ verified: false, message: 'Invalid email or password PPP' });
+            return res.json({ verified: false, message: 'Invalid email or password' });
         }
         const arr = await challengeModel.find({ userid: user._id });
         if (arr.length > 0) {
@@ -645,13 +1094,31 @@ app.post('/login/credential', async (req, res) => {
 
         let access_token = jwt.sign({ Email: user.email }, process.env.ACCESS_SECRET_KEY, { expiresIn: process.env.ACCESS_TOKEN_EXPIRE_IN });
         let refresh_token = jwt.sign({ Email: user.email }, process.env.REFRESH_SECRET_KEY, { expiresIn: process.env.REFRESH_TOKEN_EXPIRE_IN });
-        res.cookie('access_token', access_token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 1000 * 60 });
+        res.cookie('access_token', access_token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 1000 * 60 * 15});
         res.cookie('refresh_token', refresh_token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 1000 * 60 * 60 * 24 * 7 });
         return res.json({ verified: true, message: 'Login Successful!!' });
     }
     await challengeModel.findOneAndDelete({ userid: userId });
     return res.json({ verified: false, message: 'Login Failed. You are not authenticated.' });
 });
+
+// Cleanup decrypted files
+app.post('/cleanup-decrypted-file', authenticateToken, (req, res) => {
+    try {
+        console.log('Cleanup request received');
+        const { filePath } = req.body;
+        const fullPath = `./public${filePath}`;
+
+        if (fs.existsSync(fullPath)) {
+            fs.unlinkSync(fullPath);
+        }
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Cleanup error:', error);
+        res.status(500).json({ error: 'Cleanup failed' });
+    }
+})
 
 app.get('/logout', (req, res) => {
     if (req.cookies.access_token) {
@@ -662,7 +1129,6 @@ app.get('/logout', (req, res) => {
     }
     res.redirect('/');
 });
-
 server.listen(3000, () => {
     console.log('Server is running on http://localhost:3000');
 });

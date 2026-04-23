@@ -15,6 +15,118 @@ const currentUser = JSON.parse(decodeURIComponent(chatDataDiv.dataset.currentUse
 const chatUser = JSON.parse(decodeURIComponent(chatDataDiv.dataset.chatUser));
 const messages = JSON.parse(decodeURIComponent(chatDataDiv.dataset.messages));
 
+// Add CSS for animations and progress bars
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    
+    @keyframes slideIn {
+        0% { 
+            opacity: 0; 
+            transform: translateY(20px); 
+        }
+        100% { 
+            opacity: 1; 
+            transform: translateY(0); 
+        }
+    }
+    
+    @keyframes slideInRight {
+        0% { 
+            opacity: 0; 
+            transform: translateX(100%); 
+        }
+        100% { 
+            opacity: 1; 
+            transform: translateX(0); 
+        }
+    }
+    
+    @keyframes slideOutRight {
+        0% { 
+            opacity: 1; 
+            transform: translateX(0); 
+        }
+        100% { 
+            opacity: 0; 
+            transform: translateX(100%); 
+        }
+    }
+    
+    @keyframes fadeIn {
+        0% { opacity: 0; }
+        100% { opacity: 1; }
+    }
+    
+    @keyframes fadeOut {
+        0% { opacity: 1; }
+        100% { opacity: 0; }
+    }
+    
+    @keyframes progressPulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
+    }
+    
+    .encrypted-content:hover {
+        box-shadow: 0 4px 15px rgba(13, 110, 253, 0.3);
+    }
+    
+    .message.user .encrypted-content {
+        border: 2px solid rgba(13, 110, 253, 0.2);
+    }
+    
+    .message.bot .encrypted-content {
+        border: 2px solid rgba(40, 167, 69, 0.2);
+    }
+    
+    .decryption-progress, .file-decryption-progress {
+        backdrop-filter: blur(5px);
+    }
+    
+    .progress-bar {
+        box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);
+    }
+    
+    .progress-fill {
+        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+    
+    .spinner {
+        filter: drop-shadow(0 0 3px rgba(13, 110, 253, 0.5));
+    }
+    
+    .message {
+        animation: slideIn 0.3s ease;
+    }
+    
+    .encrypted-overlay {
+        backdrop-filter: blur(2px);
+    }
+    
+    .file-preview-container {
+        animation: slideIn 0.3s ease;
+    }
+    
+    @media (max-width: 768px) {
+        .progress-bar {
+            width: 200px;
+        }
+        
+        .file-decryption-progress .progress-bar {
+            width: 180px;
+        }
+        
+        .encrypted-content {
+            max-width: 250px;
+        }
+    }
+`;
+document.head.appendChild(style);
+
 // Handle home button click
 homeBtn.addEventListener('click', () => {
     socket.disconnect();
@@ -81,17 +193,28 @@ socket.on('userOffline', (userId) => {
 
 // Load existing file content on page load
 document.addEventListener('DOMContentLoaded', () => {
-    const fileContents = document.querySelectorAll('.file-content');
-    fileContents.forEach(container => {
-        const encodedData = container.dataset.file;
-        if (encodedData) {
-            try {
-                const fileData = JSON.parse(decodeURIComponent(encodedData));
-                renderFileContent(container, fileData);
-            } catch (error) {
-                console.error('Error parsing file data:', error);
-            }
-        }
+    // Handle encrypted messages on page load
+    const encryptedContents = document.querySelectorAll('.encrypted-content');
+    encryptedContents.forEach(container => {
+        const messageId = container.closest('[data-message-id]').getAttribute('data-message-id');
+
+        // Add hover effects
+        container.addEventListener('mouseenter', () => {
+            container.style.transform = 'scale(1.02)';
+            const overlay = container.querySelector('.encrypted-overlay');
+            if (overlay) overlay.style.opacity = '1';
+        });
+
+        container.addEventListener('mouseleave', () => {
+            container.style.transform = 'scale(1)';
+            const overlay = container.querySelector('.encrypted-overlay');
+            if (overlay) overlay.style.opacity = '0';
+        });
+
+        // Add click handler for decryption
+        container.addEventListener('click', () => {
+            requestDecryption(messageId);
+        });
     });
 
     // It automatically scrolls the chat container to the bottom, so the user sees the latest messages.
@@ -273,7 +396,7 @@ function formatFileSize(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-// Enhanced file sending with progress tracking
+// Modified sendMessage function for encryption
 function sendMessage() {
     const text = textInput.value.trim();
     const file = fileInput.files[0];
@@ -281,16 +404,32 @@ function sendMessage() {
     if (!text && !file) return;
 
     if (file) {
-        sendFileWithProgress(file, text);
+        sendEncryptedFile(file);
     } else {
-        // Send text message only
-        socket.emit('sendMessage', {
-            senderId: currentUser._id,
-            receiverId: chatUser._id,
-            message: text,
-            fileData: null
-        });
+        sendEncryptedMessage(text);
     }
+}
+
+function sendEncryptedMessage(message) {
+    // Show encrypting status
+    sendBtn.disabled = true;
+    sendBtn.innerHTML = 'Encrypting...';
+
+    showEncryptionProgress('message', message.substring(0, 50) + '...');
+
+    socket.emit('sendEncryptedMessage', {
+        senderId: currentUser._id,
+        receiverId: chatUser._id,
+        message: message
+    });
+
+    // Clear input
+    textInput.value = '';
+}
+
+function sendEncryptedFile(file) {
+    // First upload the file normally, then it will be encrypted
+    sendFileWithProgress(file, '');
 }
 
 function sendFileWithProgress(file, message) {
@@ -379,7 +518,6 @@ function sendFileWithProgress(file, message) {
     xhr.send(formData);
 }
 
-
 // Enhanced progress UI functions with better cleanup
 function showUploadProgress(fileId, fileName, type = 'Uploading') {
     // Remove any existing progress with same fileId first
@@ -461,8 +599,578 @@ function updateUploadProgress(fileId, progress) {
 function hideUploadProgress(fileId) {
     const progressDiv = document.getElementById(`progress-${fileId}`);
     if (progressDiv) {
-        progressDiv.remove();
+        progressDiv.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+        progressDiv.style.opacity = '0';
+        progressDiv.style.transform = 'translateY(-20px)';
+        setTimeout(() => {
+            if (progressDiv.parentNode) {
+                progressDiv.remove();
+            }
+        }, 300);
     }
+}
+// Enhanced progress cleanup function
+function cleanupAllProgress() {
+    const progressElements = document.querySelectorAll('[id^="progress-"]');
+    progressElements.forEach(el => {
+        el.style.transition = 'opacity 0.3s ease';
+        el.style.opacity = '0';
+        setTimeout(() => {
+            if (el.parentNode) {
+                el.remove();
+            }
+        }, 300);
+    });
+}
+// Encryption Progress Functions
+function showEncryptionProgress(type, content) {
+    const progressId = `encryption-${Date.now()}`;
+
+    const progressDiv = document.createElement('div');
+    progressDiv.id = progressId;
+    progressDiv.classList.add('message', 'user');
+    progressDiv.style.cssText = `
+        background: #333;
+        padding: 15px;
+        margin: 5px 0;
+        border-radius: 10px;
+        color: white;
+        border-left: 4px solid #ffc107;
+        animation: slideIn 0.3s ease;
+    `;
+
+    const contentDisplay = type === 'message' ? content : `File: ${content}`;
+
+    progressDiv.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+            <div class="spinner" style="
+                width: 20px; 
+                height: 20px; 
+                border: 2px solid #555; 
+                border-top: 2px solid #ffc107; 
+                border-radius: 50%; 
+                animation: spin 1s linear infinite;
+            "></div>
+            <span>🔒 Encrypting ${type === 'message' ? 'Message' : 'File'}</span>
+        </div>
+        <div style="font-size: 0.9em; opacity: 0.8; margin-bottom: 8px;">
+            ${contentDisplay}
+        </div>
+        <div class="progress-bar" style="
+            background: #555; 
+            height: 8px; 
+            border-radius: 4px; 
+            overflow: hidden;
+        ">
+            <div class="progress-fill" style="
+                background: linear-gradient(90deg, #ffc107, #fd7e14); 
+                height: 100%; 
+                width: 0%; 
+                border-radius: 4px; 
+                transition: width 0.3s ease;
+            "></div>
+        </div>
+        <div class="progress-text" style="
+            font-size: 0.8em; 
+            margin-top: 5px; 
+            opacity: 0.8;
+            text-align: center;
+        ">Preparing for encryption...</div>
+    `;
+
+    messagesEl.appendChild(progressDiv);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+
+    return progressId;
+}
+
+function showFileEncryptionProgress(fileData) {
+    const progressId = `file-encryption-${Date.now()}`;
+
+    const progressDiv = document.createElement('div');
+    progressDiv.id = progressId;
+    progressDiv.classList.add('message', 'user');
+    progressDiv.style.cssText = `
+        background: #333;
+        padding: 15px;
+        margin: 5px 0;
+        border-radius: 10px;
+        color: white;
+        border-left: 4px solid #fd7e14;
+        animation: slideIn 0.3s ease;
+    `;
+
+    const fileIcon = getFileIcon(fileData.mimetype, fileData.originalName);
+
+    progressDiv.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+            <div class="spinner" style="
+                width: 20px; 
+                height: 20px; 
+                border: 2px solid #555; 
+                border-top: 2px solid #fd7e14; 
+                border-radius: 50%; 
+                animation: spin 1s linear infinite;
+            "></div>
+            <span>🔒 Encrypting File</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+            <span style="font-size: 24px;">${fileIcon}</span>
+            <div>
+                <div style="font-weight: bold;">${fileData.originalName}</div>
+                <div style="opacity: 0.7; font-size: 0.8em;">${formatFileSize(fileData.size)}</div>
+            </div>
+        </div>
+        <div class="progress-bar" style="
+            background: #555; 
+            height: 8px; 
+            border-radius: 4px; 
+            overflow: hidden;
+        ">
+            <div class="progress-fill" style="
+                background: linear-gradient(90deg, #fd7e14, #e55a4e); 
+                height: 100%; 
+                width: 0%; 
+                border-radius: 4px; 
+                transition: width 0.3s ease;
+            "></div>
+        </div>
+        <div class="progress-text" style="
+            font-size: 0.8em; 
+            margin-top: 5px; 
+            opacity: 0.8;
+            text-align: center;
+        ">Preparing for encryption...</div>
+    `;
+
+    messagesEl.appendChild(progressDiv);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+
+    return progressId;
+}
+
+function updateEncryptionProgress(stage, progress) {
+    const progressDiv = document.querySelector('[id^="encryption-"]');
+    if (progressDiv) {
+        const progressFill = progressDiv.querySelector('.progress-fill');
+        const progressText = progressDiv.querySelector('.progress-text');
+
+        if (progressFill) progressFill.style.width = `${progress}%`;
+        if (progressText) progressText.textContent = `${stage} (${progress}%)`;
+
+        if (progress === 100) {
+            const spinner = progressDiv.querySelector('.spinner');
+            if (spinner) spinner.style.display = 'none';
+
+            setTimeout(() => {
+                if (progressDiv.parentNode) {
+                    progressDiv.style.opacity = '0';
+                    setTimeout(() => progressDiv.remove(), 300);
+                }
+            }, 1000);
+        }
+    }
+}
+
+function updateFileEncryptionProgress(stage, progress) {
+    const progressDiv = document.querySelector('[id^="file-encryption-"]');
+    if (progressDiv) {
+        const progressFill = progressDiv.querySelector('.progress-fill');
+        const progressText = progressDiv.querySelector('.progress-text');
+
+        if (progressFill) progressFill.style.width = `${progress}%`;
+        if (progressText) progressText.textContent = `${stage} (${progress}%)`;
+
+        if (progress === 100) {
+            const spinner = progressDiv.querySelector('.spinner');
+            if (spinner) spinner.style.display = 'none';
+
+            setTimeout(() => {
+                if (progressDiv.parentNode) {
+                    progressDiv.style.opacity = '0';
+                    setTimeout(() => progressDiv.remove(), 300);
+                }
+            }, 1000);
+        }
+    }
+}
+
+// Decryption Progress Functions
+function showDecryptionProgress(messageId) {
+    const messageDiv = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (!messageDiv) return;
+
+    const progressOverlay = document.createElement('div');
+    progressOverlay.className = 'decryption-progress';
+    progressOverlay.style.cssText = `
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.9);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        z-index: 10;
+        border-radius: 10px;
+    `;
+
+    progressOverlay.innerHTML = `
+        <div class="spinner" style="
+            width: 30px; 
+            height: 30px; 
+            border: 3px solid #555; 
+            border-top: 3px solid #28a745; 
+            border-radius: 50%; 
+            animation: spin 1s linear infinite;
+            margin-bottom: 15px;
+        "></div>
+        <div style="font-size: 18px; margin-bottom: 10px;">🔓 Decrypting</div>
+        <div class="decrypt-stage" style="font-size: 12px; margin-bottom: 10px; opacity: 0.8;">Starting decryption...</div>
+        <div class="progress-bar" style="
+            background: #555; 
+            height: 8px; 
+            border-radius: 4px; 
+            overflow: hidden;
+            width: 200px;
+        ">
+            <div class="progress-fill" style="
+                background: linear-gradient(90deg, #28a745, #20c997); 
+                height: 100%; 
+                width: 0%; 
+                border-radius: 4px; 
+                transition: width 0.3s ease;
+            "></div>
+        </div>
+        <div class="progress-percent" style="font-size: 11px; margin-top: 8px; opacity: 0.7;">0%</div>
+    `;
+
+    const encryptedContent = messageDiv.querySelector('.encrypted-content');
+    if (encryptedContent) {
+        encryptedContent.style.position = 'relative';
+        encryptedContent.appendChild(progressOverlay);
+    }
+}
+
+function showFileDecryptionProgress(messageId, fileName) {
+    const messageDiv = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (!messageDiv) return;
+
+    const progressOverlay = document.createElement('div');
+    progressOverlay.className = 'file-decryption-progress';
+    progressOverlay.style.cssText = `
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.9);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        z-index: 10;
+        border-radius: 10px;
+    `;
+
+    progressOverlay.innerHTML = `
+        <div class="spinner" style="
+            width: 30px; 
+            height: 30px; 
+            border: 3px solid #555; 
+            border-top: 3px solid #28a745; 
+            border-radius: 50%; 
+            animation: spin 1s linear infinite;
+            margin-bottom: 15px;
+        "></div>
+        <div style="font-size: 18px; margin-bottom: 10px;">🔓 Decrypting File</div>
+        <div style="font-size: 14px; margin-bottom: 15px; text-align: center; max-width: 200px; word-wrap: break-word;">
+            📁 ${fileName}
+        </div>
+        <div class="decrypt-stage" style="font-size: 12px; margin-bottom: 10px; opacity: 0.8;">Starting decryption...</div>
+        <div class="progress-bar" style="
+            background: #555; 
+            height: 8px; 
+            border-radius: 4px; 
+            overflow: hidden;
+            width: 250px;
+        ">
+            <div class="progress-fill" style="
+                background: linear-gradient(90deg, #28a745, #20c997); 
+                height: 100%; 
+                width: 0%; 
+                border-radius: 4px; 
+                transition: width 0.3s ease;
+            "></div>
+        </div>
+        <div class="progress-percent" style="font-size: 11px; margin-top: 8px; opacity: 0.7;">0%</div>
+    `;
+
+    const encryptedContent = messageDiv.querySelector('.encrypted-content');
+    if (encryptedContent) {
+        encryptedContent.style.position = 'relative';
+        encryptedContent.appendChild(progressOverlay);
+    }
+}
+
+function updateDecryptionProgress(messageId, stage, progress) {
+    const messageDiv = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (!messageDiv) return;
+
+    const progressOverlay = messageDiv.querySelector('.decryption-progress');
+    if (!progressOverlay) return;
+
+    const stageDiv = progressOverlay.querySelector('.decrypt-stage');
+    const progressFill = progressOverlay.querySelector('.progress-fill');
+    const progressPercent = progressOverlay.querySelector('.progress-percent');
+
+    if (stageDiv) stageDiv.textContent = stage;
+    if (progressFill) progressFill.style.width = `${progress}%`;
+    if (progressPercent) progressPercent.textContent = `${progress}%`;
+
+    if (progress === 100) {
+        const spinner = progressOverlay.querySelector('.spinner');
+        if (spinner) spinner.style.display = 'none';
+
+        setTimeout(() => {
+            if (progressOverlay.parentNode) {
+                progressOverlay.style.opacity = '0';
+                setTimeout(() => progressOverlay.remove(), 300);
+            }
+        }, 1000);
+    }
+}
+
+function updateFileDecryptionProgress(messageId, stage, progress) {
+    const messageDiv = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (!messageDiv) return;
+
+    const progressOverlay = messageDiv.querySelector('.file-decryption-progress');
+    if (!progressOverlay) return;
+
+    const stageDiv = progressOverlay.querySelector('.decrypt-stage');
+    const progressFill = progressOverlay.querySelector('.progress-fill');
+    const progressPercent = progressOverlay.querySelector('.progress-percent');
+
+    if (stageDiv) stageDiv.textContent = stage;
+    if (progressFill) progressFill.style.width = `${progress}%`;
+    if (progressPercent) progressPercent.textContent = `${progress}%`;
+
+    if (progress === 100) {
+        const spinner = progressOverlay.querySelector('.spinner');
+        if (spinner) spinner.style.display = 'none';
+
+        setTimeout(() => {
+            if (progressOverlay.parentNode) {
+                progressOverlay.style.opacity = '0';
+                setTimeout(() => progressOverlay.remove(), 300);
+            }
+        }, 1000);
+    }
+}
+
+// Helper function to get encrypted data from message element
+function getEncryptedDataFromMessage(messageDiv) {
+    const encryptedDataAttr = messageDiv.getAttribute('data-encrypted-info');
+    if (encryptedDataAttr) {
+        try {
+            return JSON.parse(decodeURIComponent(encryptedDataAttr));
+        } catch (e) {
+            return null;
+        }
+    }
+    return null;
+}
+
+// Receiver Progress Functions
+function showReceivingProgress(messageData) {
+    const progressId = `receiving-${messageData._id}`;
+
+    const progressDiv = document.createElement('div');
+    progressDiv.id = progressId;
+    progressDiv.classList.add('message', 'bot');
+    progressDiv.style.cssText = `
+        background: #333;
+        padding: 15px;
+        margin: 5px 0;
+        border-radius: 10px;
+        color: white;
+        border-left: 4px solid #17a2b8;
+        animation: slideIn 0.3s ease;
+    `;
+
+    const messageType = messageData.encryptedData.type === 'file'
+        ? `📁 Encrypted File: ${messageData.encryptedData.originalFileName}`
+        : '💬 Encrypted Message';
+
+    progressDiv.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+            <div class="spinner" style="
+                width: 20px; 
+                height: 20px; 
+                border: 2px solid #555; 
+                border-top: 2px solid #17a2b8; 
+                border-radius: 50%; 
+                animation: spin 1s linear infinite;
+            "></div>
+            <span>📨 Receiving from ${messageData.sender.name}</span>
+        </div>
+        <div style="font-size: 0.9em; opacity: 0.8; margin-bottom: 8px;">
+            ${messageType}
+        </div>
+        <div class="progress-bar" style="
+            background: #555; 
+            height: 8px; 
+            border-radius: 4px; 
+            overflow: hidden;
+        ">
+            <div class="progress-fill" style="
+                background: linear-gradient(90deg, #17a2b8, #138496); 
+                height: 100%; 
+                width: 0%; 
+                border-radius: 4px; 
+                animation: progressPulse 2s ease-in-out infinite;
+            "></div>
+        </div>
+        <div class="progress-text" style="
+            font-size: 0.8em; 
+            margin-top: 5px; 
+            opacity: 0.8;
+            text-align: center;
+        ">Processing encrypted data...</div>
+    `;
+
+    messagesEl.appendChild(progressDiv);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+
+    let progress = 0;
+    const interval = setInterval(() => {
+        progress += Math.random() * 20;
+        if (progress >= 100) {
+            progress = 100;
+            clearInterval(interval);
+
+            setTimeout(() => {
+                completeReceivingProgress(progressId, messageData);
+            }, 500);
+        }
+
+        const progressFill = progressDiv.querySelector('.progress-fill');
+        const progressText = progressDiv.querySelector('.progress-text');
+
+        if (progressFill) {
+            progressFill.style.width = `${progress}%`;
+            progressFill.style.animation = progress === 100 ? 'none' : 'progressPulse 2s ease-in-out infinite';
+        }
+        if (progressText) {
+            progressText.textContent = progress === 100 ? 'Received!' : `Processing... ${Math.round(progress)}%`;
+        }
+    }, 200);
+}
+
+function completeReceivingProgress(progressId, messageData) {
+    const progressDiv = document.getElementById(progressId);
+    if (progressDiv) {
+        progressDiv.style.transition = 'all 0.5s ease';
+        progressDiv.style.transform = 'scale(0.95)';
+        progressDiv.style.opacity = '0.8';
+
+        setTimeout(() => {
+            progressDiv.remove();
+            appendEncryptedMessage(messageData);
+            showEncryptedContentNotification(messageData);
+        }, 500);
+    }
+}
+
+function showEncryptedContentNotification(messageData) {
+    const notificationDiv = document.createElement('div');
+    notificationDiv.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 15px 20px;
+        border-radius: 10px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        z-index: 1000;
+        animation: slideInRight 0.3s ease;
+        max-width: 300px;
+    `;
+
+    const contentType = messageData.encryptedData.type === 'file'
+        ? `📁 Encrypted file: ${messageData.encryptedData.originalFileName}`
+        : '💬 Encrypted message';
+
+    notificationDiv.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
+            <div style="font-weight: bold;">🔒 New Encrypted Content</div>
+        </div>
+        <div style="font-size: 0.9em; opacity: 0.9;">
+            From: ${messageData.sender.name}<br>
+            ${contentType}
+        </div>
+        <div style="font-size: 0.8em; opacity: 0.7; margin-top: 8px;">
+            Click to decrypt with biometric authentication
+        </div>
+    `;
+
+    document.body.appendChild(notificationDiv);
+
+    setTimeout(() => {
+        notificationDiv.style.animation = 'slideOutRight 0.3s ease';
+        setTimeout(() => {
+            if (notificationDiv.parentNode) {
+                notificationDiv.remove();
+            }
+        }, 300);
+    }, 5000);
+}
+
+function showIncomingMessageAlert(data) {
+    const alertDiv = document.createElement('div');
+    alertDiv.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0,0,0,0.9);
+        color: white;
+        padding: 20px;
+        border-radius: 15px;
+        text-align: center;
+        z-index: 1001;
+        animation: fadeIn 0.3s ease;
+        border: 2px solid #17a2b8;
+    `;
+
+    const messageType = data.type === 'file' ? 'file' : 'message';
+
+    alertDiv.innerHTML = `
+        <div style="font-size: 24px; margin-bottom: 10px;">📨</div>
+        <div style="font-weight: bold; margin-bottom: 5px;">
+            Incoming Encrypted ${messageType.charAt(0).toUpperCase() + messageType.slice(1)}
+        </div>
+        <div style="opacity: 0.8;">
+            From: ${data.sender.name}
+        </div>
+    `;
+
+    document.body.appendChild(alertDiv);
+
+    setTimeout(() => {
+        alertDiv.style.animation = 'fadeOut 0.3s ease';
+        setTimeout(() => {
+            if (alertDiv.parentNode) {
+                alertDiv.remove();
+            }
+        }, 300);
+    }, 2000);
 }
 
 // Handle receiver-side progress updates
@@ -478,6 +1186,12 @@ socket.on('fileUploadStarted', (data) => {
 socket.on('fileUploadProgress', (data) => {
     if (data.sender._id === chatUser._id) {
         updateUploadProgress(data.fileId, data.progress);
+        // ✅ Auto-cleanup when complete
+        if (data.progress === 100) {
+            setTimeout(() => {
+                hideUploadProgress(data.fileId);
+            }, 1000); // Give 1 second to see 100%, then remove
+        }
     }
 });
 
@@ -488,31 +1202,199 @@ socket.on('fileUploadFailed', (data) => {
     }
 });
 
-// Enhanced message confirmation handler
+// Enhanced message confirmation handler for encryption
 socket.on('messageConfirmed', (messageData) => {
     // Clean up ALL progress indicators that might be related to this message
-    if (messageData.fileData) {
-        const fileName = messageData.fileData.originalName || messageData.fileData.name;
-        if (fileName) {
-            // Remove progress indicators by filename match
+    // Clean up upload progress
+    cleanupAllProgress();
+    const encryptionProgressId = showFileEncryptionProgress(messageData.fileData);
+    // Show encryption progress
+    sendBtn.innerHTML = 'Encrypting File...';
+
+    // Send for encryption instead of displaying normally
+    socket.emit('sendEncryptedFile', {
+        senderId: currentUser._id,
+        receiverId: chatUser._id,
+        fileData: messageData.fileData
+    });
+
+    // Clear file input
+    fileInput.value = '';
+    filePreview.previewContainer.style.display = 'none';
+});
+
+// Handle encrypted message confirmation
+socket.on('encryptedMessageConfirmed', (messageData) => {
+    sendBtn.disabled = false;
+    sendBtn.innerHTML = 'Send';
+
+    const encryptionProgress = document.querySelector('[id^="encryption-"]');
+    if (encryptionProgress) {
+        encryptionProgress.style.opacity = '0';
+        setTimeout(() => {
+            if (encryptionProgress.parentNode) {
+                encryptionProgress.remove();
+            }
+        }, 300);
+    }
+
+    const fileEncryptionProgress = document.querySelector('[id^="file-encryption-"]');
+    if (fileEncryptionProgress) {
+        fileEncryptionProgress.style.opacity = '0';
+        setTimeout(() => {
+            if (fileEncryptionProgress.parentNode) {
+                fileEncryptionProgress.remove();
+            }
+        }, 300);
+    }
+
+    cleanupAllProgress();
+    appendEncryptedMessage(messageData);
+});
+
+
+// Handle receiving encrypted messages
+socket.on('receiveEncryptedMessage', (messageData) => {
+    if (messageData.sender._id === chatUser._id) {
+        // Clean up any progress indicators for this file
+        if (messageData.encryptedData && messageData.encryptedData.originalFileName) {
+            const fileName = messageData.encryptedData.originalFileName;
             const progressElements = document.querySelectorAll('[id^="progress-"]');
             progressElements.forEach(el => {
-                if (el.textContent.includes(fileName)) {
-                    el.remove();
+                if (el.textContent.includes(fileName) ||
+                    el.textContent.includes('Receiving') ||
+                    el.textContent.includes(messageData.sender.username)) {
+                    el.style.transition = 'opacity 0.3s ease';
+                    el.style.opacity = '0';
+                    setTimeout(() => {
+                        if (el.parentNode) {
+                            el.remove();
+                        }
+                    }, 300);
                 }
             });
         }
+        showReceivingProgress(messageData);
+        if (!document.hidden) {
+            // User is actively viewing the chat
+            socket.emit('markMessagesAsRead', {
+                senderId: messageData.sender._id,
+                receiverId: currentUser._id
+            });
+        } else {
+            // User is not actively viewing (tab hidden/minimized)
+            showNotification('New Message', `You have a new message from ${messageData.sender.username} ie ${messageData.sender.name}`);
+        }
+    } else {
+        // This is a message from someone else (not the current chat user)
+        showNotification('New Message', `You have a new message from ${messageData.sender.username} ie ${messageData.sender.name}`);
+    }
+});
+// Handle incoming encrypted message notifications
+socket.on('encryptedMessageIncoming', (data) => {
+    if (data.sender._id === chatUser._id) {
+        showIncomingMessageAlert(data);
+    }
+});
+
+// Handle encryption progress updates
+socket.on('encryptionProgress', (data) => {
+    updateEncryptionProgress(data.stage, data.progress);
+});
+
+socket.on('fileEncryptionProgress', (data) => {
+    updateFileEncryptionProgress(data.stage, data.progress);
+});
+// Handle decryption challenge
+socket.on('decryptionChallenge', async (data) => {
+    try {
+        const { messageId, options } = data;
+
+        // Import WebAuthn functions
+        const { startAuthentication } = await import('https://cdn.skypack.dev/@simplewebauthn/browser');
+
+        const authResponse = await startAuthentication(options);
+
+        socket.emit('verifyAndDecrypt', {
+            messageId: messageId,
+            userId: currentUser._id,
+            credential: authResponse
+        });
+
+    } catch (error) {
+        console.error('Authentication failed:', error);
+        // ✅ CLEANUP: Remove progress overlay when authentication fails/cancelled
+        const messageDiv = document.querySelector(`[data-message-id="${data.messageId}"]`);
+        if (messageDiv) {
+            const progressOverlay = messageDiv.querySelector('.decryption-progress, .file-decryption-progress');
+            if (progressOverlay) {
+                progressOverlay.style.opacity = '0';
+                setTimeout(() => {
+                    if (progressOverlay.parentNode) {
+                        progressOverlay.remove();
+                    }
+                }, 300);
+            }
+        }
+
+        // Show appropriate error message
+        if (error.name === 'NotAllowedError') {
+            showNotification('Authentication Cancelled', 'Biometric authentication was cancelled');
+        } else if (error.name === 'AbortError') {
+            showNotification('Authentication Aborted', 'Authentication process was aborted');
+        } else {
+            showNotification('Authentication Failed', 'Could not verify your identity');
+        }
+    }
+});
+// Handle decryption progress updates
+socket.on('decryptionProgress', (data) => {
+    const messageDiv = document.querySelector(`[data-message-id="${data.messageId}"]`);
+    const encryptedData = getEncryptedDataFromMessage(messageDiv);
+
+    if (encryptedData && encryptedData.type === 'file') {
+        updateFileDecryptionProgress(data.messageId, data.stage, data.progress);
+    } else {
+        updateDecryptionProgress(data.messageId, data.stage, data.progress);
+    }
+})
+// Handle successful decryption
+socket.on('decryptionSuccess', (data) => {
+    const { messageId, type, content, downloadPath, fileName, fileSize, fileType } = data;
+
+    if (type === 'message') {
+        showMessagePreview(content, messageId);
+    } else if (type === 'file') {
+        downloadDecryptedFile(downloadPath, fileName);
+    }
+});
+
+// Handle decryption errors
+socket.on('decryptionError', (data) => {
+    console.error('Decryption error:', data.error);
+    // ✅ CLEANUP: Remove any stuck progress overlays
+    if (data.messageId) {
+        cleanupDecryptionProgress(data.messageId);
+    }
+    showNotification('Decryption Failed', data.error);
+});
+
+// Function to request decryption
+function requestDecryption(messageId) {
+    const messageDiv = document.querySelector(`[data-message-id="${messageId}"]`);
+    const encryptedData = getEncryptedDataFromMessage(messageDiv);
+
+    if (encryptedData && encryptedData.type === 'file') {
+        showFileDecryptionProgress(messageId, encryptedData.originalFileName);
+    } else {
+        showDecryptionProgress(messageId);
     }
 
-    // Reset UI state of the sender frontend
-    sendBtn.disabled = false;
-    sendBtn.innerHTML = 'Send';
-    textInput.value = '';
-    fileInput.value = '';
-    filePreview.previewContainer.style.display = 'none';
-
-    appendMessage(messageData);
-});
+    socket.emit('requestDecryptionChallenge', {
+        messageId: messageId,
+        userId: currentUser._id
+    });
+}
 
 // Add cleanup function
 function cleanupUpload(fileId) {
@@ -523,19 +1405,116 @@ function cleanupUpload(fileId) {
     // Notify receiver that upload failed
     socket.emit('fileUploadFailed', { fileId: fileId });
 }
-
-// Add CSS for spinner animation
-const style = document.createElement('style');
-style.textContent = `
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
+// Add this helper function to clean up progress overlays
+function cleanupDecryptionProgress(messageId) {
+    const messageDiv = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (messageDiv) {
+        const progressOverlay = messageDiv.querySelector('.decryption-progress, .file-decryption-progress');
+        if (progressOverlay) {
+            progressOverlay.style.transition = 'opacity 0.3s ease';
+            progressOverlay.style.opacity = '0';
+            setTimeout(() => {
+                if (progressOverlay.parentNode) {
+                    progressOverlay.remove();
+                }
+            }, 300);
+        }
     }
-`;
-document.head.appendChild(style);
+}
+// Function to append encrypted messages
+function appendEncryptedMessage(messageData) {
+    const msgDiv = document.createElement('div');
+    msgDiv.classList.add('message');
+    msgDiv.classList.add(messageData.sender._id === currentUser._id ? 'user' : 'bot');
+    msgDiv.setAttribute('data-message-id', messageData._id);
+    msgDiv.setAttribute('data-encrypted', 'true');
 
-// Create modal for media viewing 
-function createMediaModal() {
+    // Create encrypted image container
+    const encryptedContainer = document.createElement('div');
+    encryptedContainer.className = 'encrypted-content';
+    encryptedContainer.style.cssText = `
+        position: relative;
+        cursor: pointer;
+        border-radius: 10px;
+        overflow: hidden;
+        max-width: 300px;
+        transition: transform 0.2s ease;
+    `;
+
+    const encryptedImg = document.createElement('img');
+    encryptedImg.src = messageData.encryptedData.imagePath.replace('./public', '');
+    encryptedImg.style.cssText = `
+        width: 100%;
+        height: auto;
+        display: block;
+    `;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'encrypted-overlay';
+    overlay.style.cssText = `
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: bold;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+    `;
+
+    const lockIcon = messageData.encryptedData.type === 'file' ? '📁🔒' : '💬🔒';
+    const overlayText = messageData.encryptedData.type === 'file'
+        ? `${lockIcon} Encrypted File\n${messageData.encryptedData.originalFileName}`
+        : `${lockIcon} Encrypted Message`;
+
+    overlay.innerHTML = `<div style="text-align: center; white-space: pre-line;">${overlayText}</div>`;
+
+    // Add hover effects
+    encryptedContainer.addEventListener('mouseenter', () => {
+        encryptedContainer.style.transform = 'scale(1.02)';
+        overlay.style.opacity = '1';
+    });
+
+    encryptedContainer.addEventListener('mouseleave', () => {
+        encryptedContainer.style.transform = 'scale(1)';
+        overlay.style.opacity = '0';
+    });
+
+    // Add click handler for decryption
+    encryptedContainer.addEventListener('click', () => {
+        if (messageData.receiver._id === currentUser._id || messageData.sender._id === currentUser._id) {
+            requestDecryption(messageData._id);
+        } else {
+            showNotification('Access Denied', 'You are not authorized to decrypt this message');
+        }
+    });
+
+    encryptedContainer.appendChild(encryptedImg);
+    encryptedContainer.appendChild(overlay);
+    msgDiv.appendChild(encryptedContainer);
+
+    const timeSpan = document.createElement('div');
+    timeSpan.className = 'timestamp';
+    timeSpan.textContent = new Date(messageData.timestamp).toLocaleTimeString();
+    msgDiv.appendChild(timeSpan);
+
+    // Remove "no messages" display if it exists
+    const noMessages = messagesEl.querySelector('.no-messages');
+    if (noMessages) {
+        noMessages.remove();
+    }
+
+    messagesEl.appendChild(msgDiv);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+// Function to show message preview modal
+function showMessagePreview(content, messageId) {
     const modal = document.createElement('div');
     modal.style.cssText = `
         position: fixed;
@@ -543,374 +1522,153 @@ function createMediaModal() {
         left: 0;
         width: 100%;
         height: 100%;
-        background: rgba(0,0,0,0.9);
-        display: none;
+        background: rgba(0,0,0,0.8);
+        display: flex;
         justify-content: center;
         align-items: center;
         z-index: 1000;
         padding: 20px;
     `;
 
-    const mediaContainer = document.createElement('div');
-    mediaContainer.style.cssText = `
-        max-width: 90%;
-        max-height: 90%;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 15px;
+    const previewContainer = document.createElement('div');
+    previewContainer.style.cssText = `
+        background: #222;
+        padding: 30px;
+        border-radius: 15px;
+        max-width: 80%;
+        max-height: 80%;
+        overflow-y: auto;
+        position: relative;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
     `;
 
     const closeBtn = document.createElement('button');
     closeBtn.innerHTML = '✕';
     closeBtn.style.cssText = `
         position: absolute;
-        top: 20px;
-        right: 30px;
+        top: 15px;
+        right: 20px;
         background: rgba(255,255,255,0.2);
         border: none;
         color: white;
-        font-size: 24px;
-        width: 40px;
-        height: 40px;
+        font-size: 20px;
+        width: 35px;
+        height: 35px;
         border-radius: 50%;
         cursor: pointer;
         display: flex;
         align-items: center;
         justify-content: center;
-        transition: background 0.2s ease;
     `;
 
-    const downloadBtn = document.createElement('button');
-    downloadBtn.innerHTML = '⬇️ Download';
-    downloadBtn.style.cssText = `
-        background: #0d6efd;
-        border: none;
+    const title = document.createElement('h3');
+    title.textContent = 'Decrypted Message';
+    title.style.cssText = `
         color: white;
-        padding: 10px 20px;
-        border-radius: 25px;
-        cursor: pointer;
-        font-weight: bold;
-        font-size: 14px;
-        transition: background 0.2s ease;
+        margin: 0 0 20px 0;
+        padding-right: 50px;
     `;
 
-    modal.appendChild(mediaContainer);
-    modal.appendChild(closeBtn);
-    mediaContainer.appendChild(downloadBtn);
+    const messageContent = document.createElement('div');
+    messageContent.textContent = content;
+    messageContent.style.cssText = `
+        color: white;
+        font-size: 16px;
+        line-height: 1.5;
+        word-wrap: break-word;
+        background: #333;
+        padding: 20px;
+        border-radius: 10px;
+        border-left: 4px solid #0d6efd;
+    `;
+
+    previewContainer.appendChild(closeBtn);
+    previewContainer.appendChild(title);
+    previewContainer.appendChild(messageContent);
+    modal.appendChild(previewContainer);
     document.body.appendChild(modal);
 
-    let currentMediaType = null;
-
     const closeModal = () => {
-        modal.style.display = 'none';
-        mediaContainer.innerHTML = '';
-        mediaContainer.appendChild(downloadBtn);
-        currentMediaType = null;
+        document.body.removeChild(modal);
     };
 
+    closeBtn.addEventListener('click', closeModal);
     modal.addEventListener('click', (e) => {
-        if (e.target === modal && currentMediaType === 'image') {
+        if (e.target === modal) {
             closeModal();
         }
     });
 
-    closeBtn.addEventListener('click', closeModal);
-
-    return {
-        modal,
-        mediaContainer,
-        downloadBtn,
-        closeModal,
-        setMediaType: (type) => { currentMediaType = type; }
-    };
+    // Auto-close after 30 seconds
+    setTimeout(closeModal, 30000);
 }
 
-const mediaModal = createMediaModal();
+async function downloadDecryptedFile(downloadPath, fileName) {
+    try {
+        showNotification('Download Started', `Downloading ${fileName}...`);
 
-// Enhanced file content rendering 
-function renderFileContent(container, fileData) {
-    // Add safety check for fileData
-    if (!fileData) {
-        console.error('Invalid fileData:', fileData);
-        return;
+        // Fetch the file as a blob
+        const response = await fetch(downloadPath);
+        if (!response.ok) {
+            throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+        }
+
+        const blob = await response.blob();
+
+        // Verify blob has content
+        if (blob.size === 0) {
+            throw new Error('Downloaded file is empty');
+        }
+
+        // Create download link
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        link.target = '_blank';
+
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        // Clean up blob URL
+        window.URL.revokeObjectURL(url);
+
+        showNotification('File Downloaded', `${fileName} has been downloaded successfully`);
+
+        // Now notify server that download is complete
+        fetch('/cleanup-decrypted-file', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ filePath: downloadPath })
+        }).catch(err => console.error('Cleanup error:', err));
+
+    } catch (error) {
+        console.error('Download error:', error);
+
+        // More specific error messages
+        let errorMessage = 'Failed to download file';
+        if (error.message.includes('404')) {
+            errorMessage = 'File no longer available on server';
+        } else if (error.message.includes('Network')) {
+            errorMessage = 'Network error - check your connection';
+        } else if (error.message.includes('empty')) {
+            errorMessage = 'Downloaded file is corrupted or empty';
+        }
+
+        showNotification('Download Failed', `${fileName}: ${errorMessage}`);
+
+        // Optional: Still try to cleanup on server in case file exists
+        fetch('/cleanup-decrypted-file', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ filePath: downloadPath })
+        }).catch(err => console.error('Cleanup error after failed download:', err));
     }
-
-    // Determine file source - prioritize file path over base64 data
-    const fileSrc = fileData.path || fileData.data;
-    const fileName = fileData.originalName || fileData.name || 'Unknown file';
-    const fileType = fileData.type;
-    const fileSize = fileData.size;
-
-    if (!fileSrc || !fileType) {
-        console.error('Missing file source or type:', fileData);
-        return;
-    }
-    if (fileType.startsWith('image/')) {
-        const img = document.createElement('img');
-        img.src = fileSrc;
-        img.style.cssText = `
-            max-width: 100%;
-            height: auto;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: transform 0.2s ease;
-        `;
-        img.title = 'Click to view full size';
-
-        img.addEventListener('mouseenter', () => {
-            img.style.transform = 'scale(1.02)';
-        });
-
-        img.addEventListener('mouseleave', () => {
-            img.style.transform = 'scale(1)';
-        });
-
-        img.addEventListener('click', () => {
-            const modalImg = document.createElement('img');
-            modalImg.src = fileSrc;
-            modalImg.style.cssText = `
-                max-width: 100%;
-                max-height: 80vh;
-                object-fit: contain;
-                border-radius: 10px;
-            `;
-
-            mediaModal.setMediaType('image');
-            mediaModal.mediaContainer.insertBefore(modalImg, mediaModal.downloadBtn);
-            mediaModal.downloadBtn.onclick = () => downloadFile(fileSrc, fileName);
-            mediaModal.modal.style.display = 'flex';
-        });
-
-        container.appendChild(img);
-
-    } else if (fileData.type.startsWith('video/')) {
-        const videoContainer = document.createElement('div');
-        videoContainer.style.cssText = `
-            background: #333;
-            padding: 15px;
-            border-radius: 10px;
-            margin-top: 8px;
-            cursor: pointer;
-            transition: background 0.2s ease;
-            border: 2px solid transparent;
-        `;
-        videoContainer.title = 'Click for enhanced video player';
-
-        const video = document.createElement('video');
-        video.controls = true;
-        video.src = fileSrc;
-        video.style.cssText = `
-            width: 100%;
-            max-height: 300px;
-            border-radius: 8px;
-        `;
-
-        const videoInfo = document.createElement('div');
-        videoInfo.style.cssText = `
-            font-size: 0.85em;
-            margin-bottom: 8px;
-            opacity: 0.8;
-            color: white;
-        `;
-        videoInfo.innerHTML = `🎬 ${fileName} (${formatFileSize(fileSize)})`;
-
-        videoContainer.appendChild(videoInfo);
-        videoContainer.appendChild(video);
-
-        // Add hover effects
-        videoContainer.addEventListener('mouseenter', () => {
-            videoContainer.style.background = '#444';
-            videoContainer.style.borderColor = '#0d6efd';
-        });
-
-        videoContainer.addEventListener('mouseleave', () => {
-            videoContainer.style.background = '#333';
-            videoContainer.style.borderColor = 'transparent';
-        });
-
-        // Add click event to open in modal
-        videoContainer.addEventListener('click', (e) => {
-            if (e.target === video || video.contains(e.target)) return;
-
-            video.pause();
-
-            const modalVideoContainer = document.createElement('div');
-            modalVideoContainer.style.cssText = `
-                background: #222;
-                padding: 30px;
-                border-radius: 15px;
-                text-align: center;
-                min-width: 600px;
-                box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            `;
-
-            const modalVideoTitle = document.createElement('h3');
-            modalVideoTitle.textContent = fileName;
-            modalVideoTitle.style.cssText = `
-                color: white;
-                margin: 0 0 20px 0;
-                font-size: 1.2em;
-            `;
-
-            const modalVideo = document.createElement('video');
-            modalVideo.src = fileSrc;
-            modalVideo.controls = true;
-            modalVideo.autoplay = true;
-            modalVideo.style.cssText = `
-                width: 100%;
-                max-height: 70vh;
-                margin: 20px 0;
-                border-radius: 10px;
-            `;
-
-            modalVideoContainer.appendChild(modalVideoTitle);
-            modalVideoContainer.appendChild(modalVideo);
-
-            mediaModal.setMediaType('video');
-            mediaModal.mediaContainer.insertBefore(modalVideoContainer, mediaModal.downloadBtn);
-            mediaModal.downloadBtn.onclick = () => downloadFile(fileSrc, fileName);
-            mediaModal.modal.style.display = 'flex';
-        });
-
-        container.appendChild(videoContainer);
-
-    } else if (fileData.type.startsWith('audio/')) {
-        const audioContainer = document.createElement('div');
-        audioContainer.style.cssText = `
-            background: #333;
-            padding: 15px;
-            border-radius: 10px;
-            margin-top: 8px;
-            cursor: pointer;
-            transition: background 0.2s ease;
-            border: 2px solid transparent;
-        `;
-        audioContainer.title = 'Click for enhanced audio player';
-
-        const audio = document.createElement('audio');
-        audio.controls = true;
-        audio.src = fileSrc;
-        audio.style.width = '100%';
-
-        const audioInfo = document.createElement('div');
-        audioInfo.style.cssText = `
-            font-size: 0.85em;
-            margin-bottom: 8px;
-            opacity: 0.8;
-            color: white;
-        `;
-        audioInfo.innerHTML = `🎵 ${fileName} (${formatFileSize(fileSize)})`;
-
-        audioContainer.appendChild(audioInfo);
-        audioContainer.appendChild(audio);
-
-        audioContainer.addEventListener('mouseenter', () => {
-            audioContainer.style.background = '#444';
-            audioContainer.style.borderColor = '#0d6efd';
-        });
-
-        audioContainer.addEventListener('mouseleave', () => {
-            audioContainer.style.background = '#333';
-            audioContainer.style.borderColor = 'transparent';
-        });
-
-        audioContainer.addEventListener('click', (e) => {
-            if (e.target === audio || audio.contains(e.target)) return;
-
-            audio.pause();
-
-            const modalAudioContainer = document.createElement('div');
-            modalAudioContainer.style.cssText = `
-                background: #222;
-                padding: 30px;
-                border-radius: 15px;
-                text-align: center;
-                min-width: 400px;
-                box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            `;
-
-            const modalAudioTitle = document.createElement('h3');
-            modalAudioTitle.textContent = fileName;
-            modalAudioTitle.style.cssText = `
-                color: white;
-                margin: 0 0 20px 0;
-                font-size: 1.2em;
-            `;
-
-            const modalAudio = document.createElement('audio');
-            modalAudio.src = fileSrc;
-            modalAudio.controls = true;
-            modalAudio.autoplay = true;
-            modalAudio.style.cssText = `
-                width: 100%;
-                margin: 20px 0;
-            `;
-
-            modalAudioContainer.appendChild(modalAudioTitle);
-            modalAudioContainer.appendChild(modalAudio);
-
-            mediaModal.setMediaType('audio');
-            mediaModal.mediaContainer.insertBefore(modalAudioContainer, mediaModal.downloadBtn);
-            mediaModal.downloadBtn.onclick = () => downloadFile(fileSrc, fileName);
-            mediaModal.modal.style.display = 'flex';
-        });
-
-        container.appendChild(audioContainer);
-
-    } else {
-        // Other file types
-        const fileIcon = getFileIcon(fileData.type, fileName);
-        const fileInfo = document.createElement('div');
-        fileInfo.className = 'file-info';
-        fileInfo.style.cssText = `
-            background: #333;
-            padding: 15px;
-            border-radius: 10px;
-            margin-top: 8px;
-            cursor: pointer;
-            transition: background 0.2s ease;
-            border: 2px solid transparent;
-        `;
-        fileInfo.title = 'Click to download';
-
-        fileInfo.innerHTML = `
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <span style="font-size: 24px;">${fileIcon}</span>
-                <div style="color: white;">
-                    <div style="font-weight: bold;">${fileName}</div>
-                    <div style="opacity: 0.7; font-size: 0.8em;">${formatFileSize(fileSize)}</div>
-                </div>
-            </div>
-        `;
-
-        fileInfo.addEventListener('click', () => {
-            downloadFile(fileSrc, fileName);
-        });
-
-        fileInfo.addEventListener('mouseenter', () => {
-            fileInfo.style.background = '#444';
-            fileInfo.style.borderColor = '#0d6efd';
-        });
-
-        fileInfo.addEventListener('mouseleave', () => {
-            fileInfo.style.background = '#333';
-            fileInfo.style.borderColor = 'transparent';
-        });
-
-        container.appendChild(fileInfo);
-    }
-}
-
-// Download file function
-function downloadFile(fileData, fileName) {
-    const link = document.createElement('a');
-    link.href = fileData;
-    link.download = fileName;
-    link.target = '_blank';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
 }
 
 // Get appropriate file icon based on file type
@@ -932,41 +1690,6 @@ function getFileIcon(fileType, fileName) {
     if (['html', 'css', 'php', 'py', 'java', 'cpp', 'c'].includes(extension)) return '💻';
 
     return '📎';
-}
-
-// Append message to chat
-function appendMessage(messageData) {
-    const msgDiv = document.createElement('div');
-    msgDiv.classList.add('message');
-    msgDiv.classList.add(messageData.sender._id === currentUser._id ? 'user' : 'bot');
-    msgDiv.setAttribute('data-message-id', messageData._id);
-
-    if (messageData.message) {
-        const p = document.createElement('p');
-        p.textContent = messageData.message;
-        msgDiv.appendChild(p);
-    }
-
-    if (messageData.fileData) {
-        const fileContainer = document.createElement('div');
-        fileContainer.className = 'file-content';
-        renderFileContent(fileContainer, messageData.fileData);
-        msgDiv.appendChild(fileContainer);
-    }
-
-    const timeSpan = document.createElement('div');
-    timeSpan.className = 'timestamp';
-    timeSpan.textContent = new Date(messageData.timestamp).toLocaleTimeString();
-    msgDiv.appendChild(timeSpan);
-
-    // Remove "no messages" display if it exists
-    const noMessages = messagesEl.querySelector('.no-messages');
-    if (noMessages) {
-        noMessages.remove();
-    }
-
-    messagesEl.appendChild(msgDiv);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
 // Show browser notification
@@ -1000,38 +1723,6 @@ if ('Notification' in window && Notification.permission === 'default') {
     Notification.requestPermission();
 }
 
-
-socket.on('receiveMessage', (messageData) => {
-    // Check if message is from the chat user (not from current user)
-    if (messageData.sender._id === chatUser._id) {
-        // Clean up progress indicators for received files
-        if (messageData.fileData) {
-            const fileName = messageData.fileData.originalName || messageData.fileData.name;
-            if (fileName) {
-                const progressElements = document.querySelectorAll('[id^="progress-"]');
-                progressElements.forEach(el => {
-                    if (el.textContent.includes(fileName)) {
-                        el.remove();
-                    }
-                });
-            }
-        }
-
-        if (!document.hidden) {
-            appendMessage(messageData);
-            socket.emit('markMessagesAsRead', {
-                senderId: messageData.sender._id,
-                receiverId: currentUser._id
-            });
-        } else {
-            appendMessage(messageData);
-            showNotification('New Message', `You have a new message from ${messageData.sender.username} ie ${messageData.sender.name}`);
-        }
-    } else {
-        // This is a message from someone else (not the current chat user)
-        showNotification('New Message', `You have a new message from ${messageData.sender.username} ie ${messageData.sender.name}`);
-    }
-});
 // Handle marking messages as read when user returns to the page ie maximise the window
 document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
@@ -1042,6 +1733,7 @@ document.addEventListener('visibilitychange', () => {
         });
     }
 });
+
 socket.on('messageError', (error) => {
     console.error('Message error:', error);
     alert('Failed to send message. Please try again.');
@@ -1070,6 +1762,7 @@ textInput.addEventListener('keydown', (e) => {
         }
     }
 });
+
 // Handle drag and drop file upload - Fix the event handling
 messagesEl.addEventListener('dragover', (e) => {
     e.preventDefault();
@@ -1182,7 +1875,7 @@ textInput.addEventListener('paste', (e) => {
     // First check clipboardData.files (for copied files from file explorer)
     if (files && files.length > 0) {
         e.preventDefault();
-        
+
         const file = files[0];
         if (file.size > 1024 * 1024 * 1024) {
             alert('File too large. Maximum size is 1GB.');
@@ -1244,13 +1937,6 @@ document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
         sendMessage();
-    }
-
-    // Escape to close modal
-    if (e.key === 'Escape') {
-        if (mediaModal.modal.style.display === 'flex') {
-            mediaModal.closeModal();
-        }
     }
 });
 

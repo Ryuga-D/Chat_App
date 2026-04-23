@@ -29,16 +29,24 @@
                 </div>
             <% } else { %>
                 <% messages.forEach(function(msg) { %>
-                    <div class="message <%= msg.sender._id.toString() === currentUser._id.toString() ? 'user' : 'bot' %>" data-message-id="<%= msg._id %>">
-                        <!-- here bot indicates receiver and user indicates sender i.e. myself-->
-                        <% if (msg.message) { %>
-                            <p><%= msg.message %></p>
-                        <% } %>
-                        <% if (msg.fileData) { %>
-                            <div class="file-content" data-file="<%= encodeURIComponent(JSON.stringify(msg.fileData)) %>"></div>
-                        <% } %>
-                        <div class="timestamp"><%= new Date(msg.timestamp).toLocaleTimeString() %></div>
-                    </div>
+                        <!-- Encrypted message -->
+                        <div class="message <%= msg.sender._id.toString() === currentUser._id.toString() ? 'user' : 'bot' %>" 
+                             data-message-id="<%= msg._id %>" data-encrypted="true">
+                            <div class="encrypted-content" style="position: relative; cursor: pointer; border-radius: 10px; overflow: hidden; max-width: 300px; transition: transform 0.2s ease;">
+                                <img src="<%= msg.encryptedData.imagePath.replace('./public', '') %>" 
+                                     style="width: 100%; height: auto; display: block;" alt="Encrypted content">
+                                <div class="encrypted-overlay" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; opacity: 0; transition: opacity 0.2s ease;">
+                                    <div style="text-align: center; white-space: pre-line;">
+                                        <% if (msg.encryptedData.type === 'file') { %>
+                                            📁🔒 Encrypted File<br><%= msg.encryptedData.originalFileName %>
+                                        <% } else { %>
+                                            💬🔒 Encrypted Message
+                                        <% } %>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="timestamp"><%= new Date(msg.timestamp).toLocaleTimeString() %></div>
+                        </div>
                 <% }); %>
             <% } %>
         </div>
